@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docconv"
+version = "0.1.0"
+description = "轻量文档格式转换工具：docx / pdf / txt / md 互转"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Jade", email = "zhjade5@gmail.com" }]
+keywords = ["docx", "pdf", "convert", "document", "word", "markdown"]
+dependencies = [
+    "pdfplumber>=3.0",
+    "python-docx>=1.1",
+    "reportlab>=4.0",
+]
+
+[project.scripts]
+docconv = "docconv.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/zhjade5-svg/docconv"
+Repository = "https://github.com/zhjade5-svg/docconv"
+
+[tool.setuptools]
+packages = ["docconv"]

@@ -4,18 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docconv"
-version = "0.1.0"
-description = "轻量文档格式转换工具：docx / pdf / txt / md 互转"
+version = "0.2.0"
+description = "轻量文档格式转换工具：docx / pdf / txt / md / csv / xlsx / html 互转（含图形界面）"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [{ name = "Jade", email = "zhjade5@gmail.com" }]
-keywords = ["docx", "pdf", "convert", "document", "word", "markdown"]
+keywords = ["docx", "pdf", "convert", "document", "word", "markdown", "xlsx", "csv", "html"]
 dependencies = [
     "pdfplumber>=3.0",
     "python-docx>=1.1",
     "reportlab>=4.0",
+    "openpyxl>=3.1",
+    "html2text>=2024.2.26",
+    "markdown>=3.6",
+    "tkinterdnd2>=0.3.0",
 ]
+
+[project.optional-dependencies]
+gui = ["tkinterdnd2>=0.3.0"]
 
 [project.scripts]
 docconv = "docconv.cli:main"

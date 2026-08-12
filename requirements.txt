@@ -1,3 +1,9 @@
 pdfplumber>=3.0
 python-docx>=1.1
 reportlab>=4.0
+openpyxl>=3.1
+html2text>=2024.2.26
+markdown>=3.6
+tkinterdnd2>=0.3.0  # GUI 拖拽（无界面环境可省略）
+
+# 打包成 exe 用（可选）：pyinstaller>=6.0

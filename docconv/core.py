@@ -1,27 +1,33 @@
 """docconv 核心转换逻辑。
 
-支持的格式: docx, pdf, txt, md
-依赖: pdfplumber, python-docx, reportlab
+支持的格式: docx, pdf, txt, md, csv, xlsx, html
+依赖: pdfplumber, python-docx, reportlab, openpyxl, html2text, markdown
 可选后端: LibreOffice (高质量 docx -> pdf)
 """
 from __future__ import annotations
 
+import csv
+import html as html_lib
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
+import html2text
+import markdown as md_lib
 import pdfplumber
 from docx import Document
-from docx.shared import Pt
-
+from openpyxl import Workbook, load_workbook
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
-SUPPORTED = {"docx", "pdf", "txt", "md"}
+SUPPORTED = {"docx", "pdf", "txt", "md", "csv", "xlsx", "html"}
 
 
 def find_libreoffice() -> "str | None":
@@ -186,7 +192,9 @@ def markdown_to_pdf(src: str, dst: str) -> None:
         (ln.lstrip("#").strip() if ln.lstrip().startswith("#") else ln)
         for ln in text.split("\n")
     )
-    tmp = Path(src).with_suffix(".txt")
+    fd, tmppath = tempfile.mkstemp(suffix=".txt", prefix="docconv_")
+    os.close(fd)
+    tmp = Path(tmppath)
     tmp.write_text(cleaned, encoding="utf-8")
     try:
         text_to_pdf(str(tmp), dst)
@@ -197,8 +205,153 @@ def markdown_to_pdf(src: str, dst: str) -> None:
             pass
 
 
+# ------------------------- 表格 csv / xlsx -------------------------
+def _rows_from_csv(src: str):
+    with open(src, newline="", encoding="utf-8-sig") as f:
+        return [list(r) for r in csv.reader(f)]
+
+
+def csv_to_xlsx(src: str, dst: str) -> None:
+    wb = Workbook()
+    ws = wb.active
+    for row in _rows_from_csv(src):
+        ws.append(row)
+    wb.save(dst)
+
+
+def xlsx_to_csv(src: str, dst: str) -> None:
+    wb = load_workbook(src, read_only=True, data_only=True)
+    ws = wb.active
+    with open(dst, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        for row in ws.iter_rows(values_only=True):
+            writer.writerow(["" if c is None else c for c in row])
+
+
+def csv_to_docx(src: str, dst: str) -> None:
+    doc = Document()
+    rows = _rows_from_csv(src)
+    if rows:
+        t = doc.add_table(rows=len(rows), cols=len(rows[0]))
+        try:
+            t.style = "Table Grid"
+        except Exception:
+            pass
+        for r, row in enumerate(rows):
+            for c, val in enumerate(row):
+                t.cell(r, c).text = val or ""
+    doc.save(dst)
+
+
+def xlsx_to_docx(src: str, dst: str) -> None:
+    doc = Document()
+    wb = load_workbook(src, read_only=True, data_only=True)
+    ws = wb.active
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    if rows:
+        ncols = max((len(r) for r in rows), default=1)
+        t = doc.add_table(rows=len(rows), cols=ncols)
+        try:
+            t.style = "Table Grid"
+        except Exception:
+            pass
+        for r, row in enumerate(rows):
+            for c in range(ncols):
+                v = row[c] if c < len(row) else None
+                t.cell(r, c).text = "" if v is None else str(v)
+    doc.save(dst)
+
+
+def _table_to_pdf(rows, dst: str) -> None:
+    doc = SimpleDocTemplate(str(dst), pagesize=A4)
+    ncols = max((len(r) for r in rows), default=1)
+    data = [
+        ["" if (c >= len(r) or r[c] is None) else str(r[c]) for c in range(ncols)]
+        for r in rows
+    ]
+    t = Table(data)
+    t.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+    ]))
+    doc.build([t])
+
+
+def csv_to_pdf(src: str, dst: str) -> None:
+    _table_to_pdf(_rows_from_csv(src), dst)
+
+
+def xlsx_to_pdf(src: str, dst: str) -> None:
+    wb = load_workbook(src, read_only=True, data_only=True)
+    ws = wb.active
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    _table_to_pdf(rows, dst)
+
+
+# ------------------------- html 互转 -------------------------
+def html_to_md(src: str, dst: str) -> None:
+    h = html2text.HTML2Text()
+    h.body_width = 0
+    raw = Path(src).read_text(encoding="utf-8")
+    Path(dst).write_text(h.handle(raw), encoding="utf-8")
+
+
+def html_to_text(src: str, dst: str) -> None:
+    # 文本形态与 markdown 同源（html2text 默认即纯文本风格）
+    html_to_md(src, dst)
+
+
+def text_to_html(src: str, dst: str) -> None:
+    text = Path(src).read_text(encoding="utf-8")
+    esc = html_lib.escape(text)
+    html = (
+        "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\">"
+        f"<title>{html_lib.escape(Path(src).stem)}</title></head>"
+        f"<body><pre>{esc}</pre></body></html>"
+    )
+    Path(dst).write_text(html, encoding="utf-8")
+
+
+def md_to_html(src: str, dst: str) -> None:
+    text = Path(src).read_text(encoding="utf-8")
+    body = md_lib.markdown(text, extensions=["tables", "fenced_code"])
+    html = (
+        "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\">"
+        f"<title>{html_lib.escape(Path(src).stem)}</title></head>"
+        f"<body>{body}</body></html>"
+    )
+    Path(dst).write_text(html, encoding="utf-8")
+
+
+def docx_to_html(src: str, dst: str) -> None:
+    doc = Document(src)
+    parts = []
+    for p in doc.paragraphs:
+        style = (p.style.name or "") if p.style else ""
+        text = html_lib.escape(p.text)
+        if style == "Title":
+            parts.append(f"<h1>{text}</h1>")
+        elif style.startswith("Heading"):
+            try:
+                level = int(style[len("Heading"):])
+            except ValueError:
+                level = 1
+            lv = min(level, 6)
+            parts.append(f"<h{lv}>{text}</h{lv}>")
+        else:
+            parts.append(f"<p>{text}</p>")
+    html = (
+        "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\">"
+        f"<title>{html_lib.escape(Path(src).stem)}</title></head>"
+        f"<body>{''.join(parts)}</body></html>"
+    )
+    Path(dst).write_text(html, encoding="utf-8")
+
+
 # ------------------------- 路由 -------------------------
 _ROUTES = {
+    # 原有
     ("docx", "pdf"): docx_to_pdf,
     ("pdf", "docx"): pdf_to_docx,
     ("docx", "txt"): docx_to_text,
@@ -207,6 +360,19 @@ _ROUTES = {
     ("md", "docx"): markdown_to_docx,
     ("txt", "pdf"): text_to_pdf,
     ("md", "pdf"): markdown_to_pdf,
+    # 表格 csv / xlsx
+    ("csv", "xlsx"): csv_to_xlsx,
+    ("xlsx", "csv"): xlsx_to_csv,
+    ("csv", "docx"): csv_to_docx,
+    ("xlsx", "docx"): xlsx_to_docx,
+    ("csv", "pdf"): csv_to_pdf,
+    ("xlsx", "pdf"): xlsx_to_pdf,
+    # html
+    ("html", "txt"): html_to_text,
+    ("html", "md"): html_to_md,
+    ("txt", "html"): text_to_html,
+    ("md", "html"): md_to_html,
+    ("docx", "html"): docx_to_html,
 }
 
 

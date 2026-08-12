@@ -1,33 +1,32 @@
 # docconv
 
-轻量文档格式转换工具：在 **doc / docx / pdf / txt / md / csv / xlsx / html** 之间互转。
+轻量文档格式转换工具：在 **docx / pdf / txt / md / csv / xlsx / html** 之间互转。
 
 纯 Python 实现，零云服务、本地离线可用。带 **图形界面（拖拽批量转换）**，也可当命令行 / Python 库使用。
-需要高质量 `docx → pdf` 时，会自动调用本机已安装的 **LibreOffice**（headless），没有也不影响其他转换。
+`docx → pdf` 由 reportlab 纯 Python 渲染，**无需安装 LibreOffice 等任何外部软件**。
 
 ## 特性
 
-- 支持 8 种常见格式互转（见下方支持矩阵）
+- 支持 7 种常见格式互转（见下方支持矩阵）
 - 三种用法：图形界面（拖拽批量）、命令行、Python 库
-- 本地离线运行，文档不出本机
-- `docx → pdf` 借助 LibreOffice 保证排版质量
+- 本地离线运行，文档不出本机，且**无需 LibreOffice 等外部依赖**
+- `docx → pdf` 由 reportlab 纯 Python 渲染（离线、依赖系统中文字体）
 - 中文友好：`txt / md / csv / xlsx → pdf` 自动启用系统中文字体
 
 ## 支持矩阵
 
-| 源 \ 目标 | doc | docx | pdf | txt | md | csv | xlsx | html |
-|-----------|:---:|:----:|:---:|:---:|:--:|:---:|:----:|:----:|
-| **doc**   |  -  |  ✅  |  ✅  | ✅ | ✅ |  ❌  |  ❌   |  ✅   |
-| **docx**  |  ✅  |  -   |  ✅  | ✅ | ✅ |  ❌  |  ❌   |  ✅   |
-| **pdf**   |  ❌  |  ✅  |  -  | ❌ | ❌ |  ❌  |  ❌   |  ❌   |
-| **txt**   |  ❌  |  ✅  |  ✅  |  - | ❌ |  ❌  |  ❌   |  ✅   |
-| **md**    |  ❌  |  ✅  |  ✅  | ❌ |  - |  ❌  |  ❌   |  ✅   |
-| **csv**   |  ❌  |  ✅  |  ✅  | ❌ | ❌ |  -   |  ✅   |  ❌   |
-| **xlsx**  |  ❌  |  ✅  |  ✅  | ❌ | ❌ |  ✅  |  -    |  ❌   |
-| **html**  |  ❌  |  ❌  |  ❌  | ✅ | ✅ |  ❌  |  ❌   |  -    |
+| 源 \ 目标 | docx | pdf | txt | md | csv | xlsx | html |
+|-----------|:----:|:---:|:---:|:--:|:---:|:----:|:----:|
+| **docx**  |  -   |  ✅  |  ✅  | ✅ |  ❌  |  ❌   |  ✅   |
+| **pdf**   |  ✅  |  -  |  ❌  | ❌ |  ❌  |  ❌   |  ❌   |
+| **txt**   |  ✅  |  ✅  |  -  | ❌ |  ❌  |  ❌   |  ✅   |
+| **md**    |  ✅  |  ✅  |  ❌  |  - |  ❌  |  ❌   |  ✅   |
+| **csv**   |  ✅  |  ✅  |  ❌  | ❌ |  -   |  ✅   |  ❌   |
+| **xlsx**  |  ✅  |  ✅  |  ❌  | ❌ |  ✅  |  -    |  ❌   |
+| **html**  |  ❌  |  ❌  |  ✅  | ✅ |  ❌  |  ❌   |  -    |
 
-> 说明：`.doc` 是老版 Word (97–2003) 二进制格式，需经本机 **LibreOffice** 中转（拖入 .doc 时自动调用）；未安装 LibreOffice 则 .doc 相关转换不可用。
-> `pdf → txt/md/csv/xlsx/doc` 暂未实现；`html → docx/xlsx/pdf/doc` 同理未实现（保持「稳」优先）。
+> 说明：`docx → pdf` 由 reportlab 纯 Python 渲染，无需 LibreOffice。
+> `pdf → txt/md/csv/xlsx` 暂未实现；`html → docx/xlsx/pdf` 同理未实现（保持「稳」优先）。
 
 ## 安装
 
@@ -39,9 +38,6 @@ pip install -e .
 # 或仅安装依赖后直接用模块运行
 pip install -r requirements.txt
 ```
-
-可选：安装 [LibreOffice](https://www.libreoffice.org/) 以获得高质量的 `docx → pdf` 转换。
-Windows 常见安装路径会被自动识别；其他平台确保 `soffice` / `libreoffice` 在 PATH 中。
 
 ## 快速开始（图形界面）
 
@@ -77,7 +73,7 @@ docconv formats
 ```python
 from docconv import convert
 
-convert("report.docx", "report.pdf")   # docx -> pdf（需要 LibreOffice）
+convert("report.docx", "report.pdf")   # docx -> pdf（纯 Python 渲染，无需 LibreOffice）
 convert("note.txt", "note.docx")       # txt -> docx
 convert("table.csv", "table.xlsx")     # csv -> xlsx
 convert("page.html", "page.md")        # html -> md
@@ -109,7 +105,6 @@ pyinstaller --onefile --windowed --collect-all tkinterdnd2 --name docconv run_gu
 
 - `pdf → docx` 为提取式转换：文本按段落还原，表格以表格形式追加；PDF 中图片暂不直接保留。
 - `txt / md → pdf` 为简单排版（逐行），不含复杂样式。
-- 未安装 LibreOffice 时，`docx → pdf` 不可用（其他方向不受影响）。
 - 转换在源文件同目录生成新文件，不会覆盖源文件（除非显式指定同名不同后缀的输出）。
 
 ## 贡献

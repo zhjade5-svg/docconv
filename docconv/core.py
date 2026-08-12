@@ -1,8 +1,8 @@
 """docconv 核心转换逻辑。
 
-支持的格式: docx, pdf, txt, md, csv, xlsx, html
+支持的格式: doc, docx, pdf, txt, md, csv, xlsx, html
 依赖: pdfplumber, python-docx, reportlab, openpyxl, html2text, markdown
-可选后端: LibreOffice (高质量 docx -> pdf)
+可选后端: LibreOffice (.doc 读写、高质量 docx -> pdf)
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
-SUPPORTED = {"docx", "pdf", "txt", "md", "csv", "xlsx", "html"}
+SUPPORTED = {"doc", "docx", "pdf", "txt", "md", "csv", "xlsx", "html"}
 
 
 def find_libreoffice() -> "str | None":
@@ -74,6 +74,82 @@ def docx_to_pdf(src: str, dst: str) -> None:
     generated = Path(outdir) / (Path(src).stem + ".pdf")
     if generated.resolve() != Path(dst).resolve():
         generated.replace(dst)
+
+
+# ------------------------- .doc 读写 (经 LibreOffice) -------------------------
+def _libreoffice_convert(src: str, fmt: str, dst: str) -> None:
+    """用 LibreOffice 把 src 直接转成目标格式 fmt (如 docx / pdf / doc)。"""
+    lo = find_libreoffice()
+    if not lo:
+        raise RuntimeError(
+            "未找到 LibreOffice，无法转换 .doc 文件。\n"
+            "请安装 LibreOffice (https://www.libreoffice.org/) 后重试。"
+        )
+    outdir = str(Path(dst).parent)
+    cmd = [lo, "--headless", "--convert-to", fmt, "--outdir", outdir, str(src)]
+    subprocess.run(cmd, check=True, capture_output=True)
+    generated = Path(outdir) / (Path(src).stem + "." + fmt)
+    if generated.exists() and generated.resolve() != Path(dst).resolve():
+        generated.replace(dst)
+
+
+def _doc_to_temp_docx(src: str) -> str:
+    """用 LibreOffice 把 .doc 转成临时 .docx，返回路径（调用方负责删除）。"""
+    lo = find_libreoffice()
+    if not lo:
+        raise RuntimeError(
+            "未找到 LibreOffice，无法转换 .doc 文件。\n"
+            "请安装 LibreOffice (https://www.libreoffice.org/) 后重试。"
+        )
+    tmp = tempfile.mkdtemp(prefix="docconv_")
+    cmd = [lo, "--headless", "--convert-to", "docx", "--outdir", tmp, str(src)]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return str(Path(tmp) / (Path(src).stem + ".docx"))
+
+
+def doc_to_docx(src: str, dst: str) -> None:
+    _libreoffice_convert(src, "docx", dst)
+
+
+def doc_to_pdf(src: str, dst: str) -> None:
+    _libreoffice_convert(src, "pdf", dst)
+
+
+def docx_to_doc(src: str, dst: str) -> None:
+    _libreoffice_convert(src, "doc", dst)
+
+
+def doc_to_text(src: str, dst: str) -> None:
+    d = _doc_to_temp_docx(src)
+    try:
+        docx_to_text(d, dst)
+    finally:
+        try:
+            Path(d).unlink()
+        except OSError:
+            pass
+
+
+def doc_to_markdown(src: str, dst: str) -> None:
+    d = _doc_to_temp_docx(src)
+    try:
+        docx_to_markdown(d, dst)
+    finally:
+        try:
+            Path(d).unlink()
+        except OSError:
+            pass
+
+
+def doc_to_html(src: str, dst: str) -> None:
+    d = _doc_to_temp_docx(src)
+    try:
+        docx_to_html(d, dst)
+    finally:
+        try:
+            Path(d).unlink()
+        except OSError:
+            pass
 
 
 # ------------------------- pdf -> docx -------------------------
@@ -351,6 +427,13 @@ def docx_to_html(src: str, dst: str) -> None:
 
 # ------------------------- 路由 -------------------------
 _ROUTES = {
+    # doc (老版 Word，经 LibreOffice)
+    ("doc", "docx"): doc_to_docx,
+    ("doc", "pdf"): doc_to_pdf,
+    ("doc", "txt"): doc_to_text,
+    ("doc", "md"): doc_to_markdown,
+    ("doc", "html"): doc_to_html,
+    ("docx", "doc"): docx_to_doc,
     # 原有
     ("docx", "pdf"): docx_to_pdf,
     ("pdf", "docx"): pdf_to_docx,

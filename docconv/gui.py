@@ -14,6 +14,7 @@ from tkinter import (
     StringVar,
     Text,
     END,
+    Entry,
     messagebox,
     filedialog,
 )
@@ -35,8 +36,9 @@ class App:
         self.root = root
         self.files = []
         self.target = StringVar(value="pdf")
+        self.out_dir = StringVar(value="")  # 空字符串 = 与源文件同目录
         root.title("docconv · 文档格式转换")
-        root.geometry("680x500")
+        root.geometry("680x540")
 
         Label(
             root,
@@ -75,7 +77,17 @@ class App:
         Button(ctrl, text="清空", command=self.clear).pack(side="left", padx=4)
         Button(ctrl, text="开始转换", command=self.start).pack(side="right", padx=4)
 
-        self.log = Text(root, height=9, state="disabled", bg="#f5f5f5")
+        # 输出目录选择
+        out_frm = Frame(root)
+        out_frm.pack(fill="x", padx=12, pady=(0, 6))
+        Label(out_frm, text="输出目录:").pack(side="left")
+        Entry(out_frm, textvariable=self.out_dir).pack(
+            side="left", fill="x", expand=True, padx=6
+        )
+        Button(out_frm, text="浏览", command=self.choose_out).pack(side="left", padx=4)
+        Label(out_frm, text="(留空=与源文件同目录)", fg="gray").pack(side="left", padx=4)
+
+        self.log = Text(root, height=8, state="disabled", bg="#f5f5f5")
         self.log.pack(fill="x", padx=12, pady=6)
 
     # ---------- 日志 ----------
@@ -101,6 +113,11 @@ class App:
         for p in paths:
             self._add(p)
 
+    def choose_out(self):
+        d = filedialog.askdirectory(title="选择输出目录")
+        if d:
+            self.out_dir.set(d)
+
     def _add(self, path):
         p = str(Path(path))
         if p not in self.files:
@@ -125,16 +142,29 @@ class App:
         threading.Thread(target=self._run, args=(to,), daemon=True).start()
 
     def _run(self, to):
-        self.log_msg(f"开始转换，目标格式: .{to}")
+        out_dir = self.out_dir.get().strip()
+        if out_dir and not Path(out_dir).is_dir():
+            self.log_msg(f"⚠ 输出目录不存在，改用源文件目录")
+            out_dir = ""
+        self.log_msg(
+            f"开始转换，目标格式: .{to}  |  输出: {out_dir or '源文件目录'}"
+        )
         ok = 0
         for src in list(self.files):
-            dst = str(Path(src).with_suffix("." + to))
+            src_p = Path(src)
+            stem = src_p.stem
+            if out_dir:
+                dst = str(Path(out_dir) / f"{stem}.{to}")
+            else:
+                dst = str(src_p.with_suffix("." + to))
             try:
                 convert(src, dst)
                 ok += 1
-                self.log_msg(f"✓ {Path(src).name} -> {Path(dst).name}")
+                self.log_msg(
+                    f"✓ {src_p.name} -> {Path(dst).name}  ({Path(dst).parent})"
+                )
             except Exception as e:
-                self.log_msg(f"✗ {Path(src).name}: {e}")
+                self.log_msg(f"✗ {src_p.name}: {e}")
         self.log_msg(f"完成：成功 {ok}/{len(self.files)}")
         messagebox.showinfo("完成", f"转换完成：成功 {ok}/{len(self.files)}")
 

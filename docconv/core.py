@@ -1,16 +1,14 @@
 """docconv 核心转换逻辑。
 
-支持的格式: doc, docx, pdf, txt, md, csv, xlsx, html
+支持的格式: docx, pdf, txt, md, csv, xlsx, html
 依赖: pdfplumber, python-docx, reportlab, openpyxl, html2text, markdown
-可选后端: LibreOffice (.doc 读写、高质量 docx -> pdf)
+docx -> pdf 由 reportlab 纯 Python 渲染（无需 LibreOffice，图片不保留、复杂排版会简化）。
 """
 from __future__ import annotations
 
 import csv
 import html as html_lib
 import os
-import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -25,21 +23,11 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from xml.sax.saxutils import escape as _xml_escape
 
-SUPPORTED = {"doc", "docx", "pdf", "txt", "md", "csv", "xlsx", "html"}
-
-
-def find_libreoffice() -> "str | None":
-    """查找本机 LibreOffice 可执行文件。"""
-    candidates = [
-        r"C:\Program Files\LibreOffice\program\soffice.exe",
-        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
-    ]
-    for c in candidates:
-        if os.path.exists(c):
-            return c
-    return shutil.which("soffice") or shutil.which("libreoffice")
+SUPPORTED = {"docx", "pdf", "txt", "md", "csv", "xlsx", "html"}
 
 
 def _get_cjk_font() -> str:
@@ -62,94 +50,61 @@ def _get_cjk_font() -> str:
 
 # ------------------------- docx -> pdf -------------------------
 def docx_to_pdf(src: str, dst: str) -> None:
-    lo = find_libreoffice()
-    if not lo:
-        raise RuntimeError(
-            "未找到 LibreOffice，无法将 docx 转为 pdf。\n"
-            "请安装 LibreOffice (https://www.libreoffice.org/) 后重试。"
+    """用 reportlab 纯 Python 渲染 docx -> pdf（无需 LibreOffice）。
+
+    保留段落、标题层级与表格；图片不保留，复杂排版（如分栏、文本框）
+    会简化为线性排版。中文依赖系统中文字体（自动探测）。
+    """
+    doc = Document(src)
+    font = _get_cjk_font()
+    ss = getSampleStyleSheet()
+    normal = ParagraphStyle(
+        "docconv_body", parent=ss["Normal"], fontName=font,
+        fontSize=10, leading=15,
+    )
+    heading_styles = {}
+    for i in range(1, 7):
+        heading_styles[i] = ParagraphStyle(
+            f"docconv_h{i}", parent=ss[f"Heading{i}"], fontName=font,
+            fontSize=max(12, 20 - i), leading=max(15, 24 - i),
         )
-    outdir = str(Path(dst).parent)
-    cmd = [lo, "--headless", "--convert-to", "pdf", "--outdir", outdir, str(src)]
-    subprocess.run(cmd, check=True, capture_output=True)
-    generated = Path(outdir) / (Path(src).stem + ".pdf")
-    if generated.resolve() != Path(dst).resolve():
-        generated.replace(dst)
-
-
-# ------------------------- .doc 读写 (经 LibreOffice) -------------------------
-def _libreoffice_convert(src: str, fmt: str, dst: str) -> None:
-    """用 LibreOffice 把 src 直接转成目标格式 fmt (如 docx / pdf / doc)。"""
-    lo = find_libreoffice()
-    if not lo:
-        raise RuntimeError(
-            "未找到 LibreOffice，无法转换 .doc 文件。\n"
-            "请安装 LibreOffice (https://www.libreoffice.org/) 后重试。"
-        )
-    outdir = str(Path(dst).parent)
-    cmd = [lo, "--headless", "--convert-to", fmt, "--outdir", outdir, str(src)]
-    subprocess.run(cmd, check=True, capture_output=True)
-    generated = Path(outdir) / (Path(src).stem + "." + fmt)
-    if generated.exists() and generated.resolve() != Path(dst).resolve():
-        generated.replace(dst)
-
-
-def _doc_to_temp_docx(src: str) -> str:
-    """用 LibreOffice 把 .doc 转成临时 .docx，返回路径（调用方负责删除）。"""
-    lo = find_libreoffice()
-    if not lo:
-        raise RuntimeError(
-            "未找到 LibreOffice，无法转换 .doc 文件。\n"
-            "请安装 LibreOffice (https://www.libreoffice.org/) 后重试。"
-        )
-    tmp = tempfile.mkdtemp(prefix="docconv_")
-    cmd = [lo, "--headless", "--convert-to", "docx", "--outdir", tmp, str(src)]
-    subprocess.run(cmd, check=True, capture_output=True)
-    return str(Path(tmp) / (Path(src).stem + ".docx"))
-
-
-def doc_to_docx(src: str, dst: str) -> None:
-    _libreoffice_convert(src, "docx", dst)
-
-
-def doc_to_pdf(src: str, dst: str) -> None:
-    _libreoffice_convert(src, "pdf", dst)
-
-
-def docx_to_doc(src: str, dst: str) -> None:
-    _libreoffice_convert(src, "doc", dst)
-
-
-def doc_to_text(src: str, dst: str) -> None:
-    d = _doc_to_temp_docx(src)
-    try:
-        docx_to_text(d, dst)
-    finally:
-        try:
-            Path(d).unlink()
-        except OSError:
-            pass
-
-
-def doc_to_markdown(src: str, dst: str) -> None:
-    d = _doc_to_temp_docx(src)
-    try:
-        docx_to_markdown(d, dst)
-    finally:
-        try:
-            Path(d).unlink()
-        except OSError:
-            pass
-
-
-def doc_to_html(src: str, dst: str) -> None:
-    d = _doc_to_temp_docx(src)
-    try:
-        docx_to_html(d, dst)
-    finally:
-        try:
-            Path(d).unlink()
-        except OSError:
-            pass
+    flow = []
+    for p in doc.paragraphs:
+        text = p.text
+        if not text.strip():
+            flow.append(Spacer(1, 6))
+            continue
+        style_name = (p.style.name or "") if p.style else ""
+        esc = _xml_escape(text)
+        if style_name == "Title":
+            flow.append(Paragraph(esc, heading_styles[1]))
+        elif style_name.startswith("Heading"):
+            try:
+                level = int(style_name[len("Heading"):])
+            except ValueError:
+                level = 1
+            flow.append(Paragraph(esc, heading_styles[min(level, 6)]))
+        else:
+            flow.append(Paragraph(esc, normal))
+    for table in doc.tables:
+        data = [[_xml_escape(cell.text) for cell in row.cells] for row in table.rows]
+        if not data:
+            continue
+        t = Table(data, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("FONTNAME", (0, 0), (-1, -1), font),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        flow.append(t)
+        flow.append(Spacer(1, 10))
+    pdf = SimpleDocTemplate(
+        str(dst), pagesize=A4,
+        leftMargin=20 * mm, rightMargin=20 * mm,
+        topMargin=20 * mm, bottomMargin=20 * mm,
+    )
+    pdf.build(flow)
 
 
 # ------------------------- pdf -> docx -------------------------
@@ -427,13 +382,6 @@ def docx_to_html(src: str, dst: str) -> None:
 
 # ------------------------- 路由 -------------------------
 _ROUTES = {
-    # doc (老版 Word，经 LibreOffice)
-    ("doc", "docx"): doc_to_docx,
-    ("doc", "pdf"): doc_to_pdf,
-    ("doc", "txt"): doc_to_text,
-    ("doc", "md"): doc_to_markdown,
-    ("doc", "html"): doc_to_html,
-    ("docx", "doc"): docx_to_doc,
     # 原有
     ("docx", "pdf"): docx_to_pdf,
     ("pdf", "docx"): pdf_to_docx,

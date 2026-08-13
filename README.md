@@ -1,32 +1,33 @@
 # docconv
 
-轻量文档格式转换工具：在 **docx / pdf / txt / md / csv / xlsx / html** 之间互转。
+轻量文档格式转换工具：在 **doc / docx / pdf / txt / md / csv / xlsx / html** 之间互转。
 
 纯 Python 实现，零云服务、本地离线可用。带 **图形界面（拖拽批量转换）**，也可当命令行 / Python 库使用。
-`docx → pdf` 由 reportlab 纯 Python 渲染，**无需安装 LibreOffice 等任何外部软件**。
+用到 `.doc` 或高质量 `docx → pdf` 时，exe 会**首次自动下载并缓存便携 LibreOffice（约 350MB，仅一次，之后离线可用）**；其余格式完全纯 Python，连 LibreOffice 都不需要。
 
 ## 特性
 
-- 支持 7 种常见格式互转（见下方支持矩阵）
+- 支持 8 种常见格式互转（见下方支持矩阵）
 - 三种用法：图形界面（拖拽批量）、命令行、Python 库
-- 本地离线运行，文档不出本机，且**无需 LibreOffice 等外部依赖**
-- `docx → pdf` 由 reportlab 纯 Python 渲染（离线、依赖系统中文字体）
+- 本地离线运行，文档不出本机
+- **LibreOffice 按需自动融入**：首次用 `.doc` / 高质量 `docx → pdf` 时自动下载并缓存便携 LO，零手动安装；其余格式纯 Python，不依赖 LibreOffice
 - 中文友好：`txt / md / csv / xlsx → pdf` 自动启用系统中文字体
 
 ## 支持矩阵
 
-| 源 \ 目标 | docx | pdf | txt | md | csv | xlsx | html |
-|-----------|:----:|:---:|:---:|:--:|:---:|:----:|:----:|
-| **docx**  |  -   |  ✅  |  ✅  | ✅ |  ❌  |  ❌   |  ✅   |
-| **pdf**   |  ✅  |  -  |  ❌  | ❌ |  ❌  |  ❌   |  ❌   |
-| **txt**   |  ✅  |  ✅  |  -  | ❌ |  ❌  |  ❌   |  ✅   |
-| **md**    |  ✅  |  ✅  |  ❌  |  - |  ❌  |  ❌   |  ✅   |
-| **csv**   |  ✅  |  ✅  |  ❌  | ❌ |  -   |  ✅   |  ❌   |
-| **xlsx**  |  ✅  |  ✅  |  ❌  | ❌ |  ✅  |  -    |  ❌   |
-| **html**  |  ❌  |  ❌  |  ✅  | ✅ |  ❌  |  ❌   |  -    |
+| 源 \ 目标 | doc | docx | pdf | txt | md | csv | xlsx | html |
+|-----------|:---:|:----:|:---:|:---:|:--:|:---:|:----:|:----:|
+| **doc**   |  -  |  ✅  |  ✅  | ✅ | ✅ |  ❌  |  ❌   |  ✅   |
+| **docx**  |  ✅  |  -   |  ✅  | ✅ | ✅ |  ❌  |  ❌   |  ✅   |
+| **pdf**   |  ❌  |  ✅  |  -  | ❌ | ❌ |  ❌  |  ❌   |  ❌   |
+| **txt**   |  ❌  |  ✅  |  ✅  |  - | ❌ |  ❌  |  ❌   |  ✅   |
+| **md**    |  ❌  |  ✅  |  ✅  | ❌ |  - |  ❌  |  ❌   |  ✅   |
+| **csv**   |  ❌  |  ✅  |  ✅  | ❌ | ❌ |  -   |  ✅   |  ❌   |
+| **xlsx**  |  ❌  |  ✅  |  ✅  | ❌ | ❌ |  ✅  |  -    |  ❌   |
+| **html**  |  ❌  |  ❌  |  ❌  | ✅ | ✅ |  ❌  |  ❌   |  -    |
 
-> 说明：`docx → pdf` 由 reportlab 纯 Python 渲染，无需 LibreOffice。
-> `pdf → txt/md/csv/xlsx` 暂未实现；`html → docx/xlsx/pdf` 同理未实现（保持「稳」优先）。
+> 说明：`.doc` 与高质量 `docx → pdf` 依赖 LibreOffice。exe 会在首次使用时**自动下载并缓存便携版**（也可使用系统已装的 LibreOffice，或把 `libreoffice/` 文件夹放在 exe 同级）。其余转换纯 Python，不依赖 LibreOffice。
+> `pdf → txt/md/csv/xlsx/doc/html` 暂未实现；`html → docx/xlsx/pdf` 同理未实现（保持「稳」优先）。
 
 ## 安装
 
@@ -73,7 +74,7 @@ docconv formats
 ```python
 from docconv import convert
 
-convert("report.docx", "report.pdf")   # docx -> pdf（纯 Python 渲染，无需 LibreOffice）
+convert("report.docx", "report.pdf")   # docx -> pdf（优先 LibreOffice 保排版，无则纯 Python）
 convert("note.txt", "note.docx")       # txt -> docx
 convert("table.csv", "table.xlsx")     # csv -> xlsx
 convert("page.html", "page.md")        # html -> md
@@ -90,6 +91,8 @@ pyinstaller --onefile --windowed --collect-all tkinterdnd2 --name docconv run_gu
 ```
 
 `--collect-all tkinterdnd2` 必须带上，否则冻结版拖拽功能失效。
+
+> 发行版默认不含 LibreOffice 本体（约 350MB），改为**首次使用时自动下载并缓存**到本地（零手动安装）。若想完全离线预置，可把一份 LibreOffice 放到 exe 同级的 `libreoffice/` 目录下（即 `libreoffice/program/soffice.exe`），exe 会优先使用它。
 
 ## 依赖
 

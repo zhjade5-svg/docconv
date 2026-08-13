@@ -1,14 +1,18 @@
 """docconv 核心转换逻辑。
 
-支持的格式: docx, pdf, txt, md, csv, xlsx, html
+支持的格式: doc, docx, pdf, txt, md, csv, xlsx, html
 依赖: pdfplumber, python-docx, reportlab, openpyxl, html2text, markdown
-docx -> pdf 由 reportlab 纯 Python 渲染（无需 LibreOffice，图片不保留、复杂排版会简化）。
+docx -> pdf 优先用 LibreOffice 保排版；无 LibreOffice 时回退 reportlab 纯 Python 渲染。
+.doc 读写需 LibreOffice（发行包已内置便携版，或系统安装版，exe 自动探测）。
 """
 from __future__ import annotations
 
 import csv
 import html as html_lib
 import os
+import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -27,7 +31,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from xml.sax.saxutils import escape as _xml_escape
 
-SUPPORTED = {"docx", "pdf", "txt", "md", "csv", "xlsx", "html"}
+SUPPORTED = {"doc", "docx", "pdf", "txt", "md", "csv", "xlsx", "html"}
 
 
 def _get_cjk_font() -> str:
@@ -48,9 +52,133 @@ def _get_cjk_font() -> str:
     return "Helvetica"
 
 
+# ------------------------- LibreOffice 探测 -------------------------
+def find_libreoffice() -> "str | None":
+    """查找 LibreOffice 可执行文件。
+
+    优先级：
+      1. 与 exe 同目录下的便携版 libreoffice/program/soffice.exe
+         （发行包已内置，用户零配置即可用）
+      2. 本地缓存目录（首次自动下载解压到的位置，见 ensure_libreoffice）
+      3. 常见系统安装路径
+      4. PATH 中的 soffice / libreoffice
+    """
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).parent
+    else:
+        base = Path(__file__).resolve().parent
+    candidates = [base / "libreoffice" / "program" / "soffice.exe"]
+    cache = _lo_cache_dir() / "program" / "soffice.exe"
+    candidates.append(cache)
+    candidates += [
+        Path(r"C:\Program Files\LibreOffice\program\soffice.exe"),
+        Path(r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return shutil.which("soffice") or shutil.which("libreoffice")
+
+
+# ------------------------- LibreOffice 自动下载 / 缓存 -------------------------
+LO_VERSION = "25.8.7"
+LO_MSI_URL = (
+    "https://download.documentfoundation.org/libreoffice/stable/"
+    f"{LO_VERSION}/win/x86_64/LibreOffice_{LO_VERSION}_Win_x86-64.msi"
+)
+_LO_PROGRESS_CB = None
+
+
+def set_lo_progress_callback(cb) -> None:
+    """设置 LO 自动下载 / 解压的进度回调，签名 cb(stage: str, percent: float|None)。"""
+    global _LO_PROGRESS_CB
+    _LO_PROGRESS_CB = cb
+
+
+def _lo_cache_dir() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
+    return Path(base) / "docconv" / "libreoffice"
+
+
+def _report(stage: str, percent=None) -> None:
+    if _LO_PROGRESS_CB:
+        try:
+            _LO_PROGRESS_CB(stage, percent)
+        except Exception:
+            pass
+
+
+def ensure_libreoffice() -> "str | None":
+    """确保 LibreOffice 可用：复用已存在版本，否则首次使用时自动下载并解压到缓存目录。
+
+    返回 soffice 可执行文件路径；无网络或解压失败时返回 None。
+    仅在「找不到任何 LibreOffice」时触发一次下载（约 350MB，之后缓存复用、离线可用）。
+    """
+    existing = find_libreoffice()
+    if existing:
+        return existing
+    cache = _lo_cache_dir()
+    bundled = cache / "program" / "soffice.exe"
+    if bundled.exists():
+        return str(bundled)
+    cache.mkdir(parents=True, exist_ok=True)
+    import urllib.request
+
+    msi = cache / f"LibreOffice_{LO_VERSION}_Win_x86-64.msi"
+    if not msi.exists():
+        _report("正在下载 LibreOffice（首次使用，约 350 MB）…", 0)
+        try:
+            def _hook(block_num, block_size, total):
+                if total:
+                    _report("下载 LibreOffice…", min(100, block_num * block_size * 100 // total))
+            urllib.request.urlretrieve(LO_MSI_URL, str(msi), _hook)
+        except Exception as e:  # noqa: BLE001
+            _report(f"LibreOffice 下载失败：{e}（可手动安装 LibreOffice 后重试）", None)
+            return None
+    _report("正在解压 LibreOffice（首次使用，请稍候）…", None)
+    try:
+        subprocess.run(
+            ["msiexec", "/a", str(msi), f"TARGETDIR={cache}", "/qn", "/norestart"],
+            check=True, capture_output=True,
+        )
+    except Exception as e:  # noqa: BLE001
+        _report(f"LibreOffice 解压失败：{e}", None)
+        return None
+    if bundled.exists():
+        _report("LibreOffice 已就绪（已缓存，后续离线可用）", 100)
+        return str(bundled)
+    _report("LibreOffice 解压后未找到 soffice.exe", None)
+    return None
+
+
+def _get_lo() -> "str | None":
+    """获取（必要时自动下载）LibreOffice 路径。"""
+    return find_libreoffice() or ensure_libreoffice()
+
+
+def _libreoffice_convert(src: str, fmt: str, dst: str, lo: "str | None" = None) -> None:
+    lo = lo or _get_lo()
+    if not lo:
+        raise RuntimeError(
+            "未找到 LibreOffice，无法完成该转换。\n"
+            "本发行版已内置便携 LibreOffice；请确认 libreoffice/ 文件夹与 exe 同级，"
+            "或在 https://www.libreoffice.org/ 安装后重试。"
+        )
+    outdir = str(Path(dst).parent)
+    cmd = [lo, "--headless", "--convert-to", fmt, "--outdir", outdir, str(src)]
+    subprocess.run(cmd, check=True, capture_output=True)
+    generated = Path(outdir) / (Path(src).stem + "." + fmt)
+    if generated.exists() and generated.resolve() != Path(dst).resolve():
+        generated.replace(dst)
+
+
 # ------------------------- docx -> pdf -------------------------
-def docx_to_pdf(src: str, dst: str) -> None:
-    """用 reportlab 纯 Python 渲染 docx -> pdf（无需 LibreOffice）。
+def _docx_to_pdf_libreoffice(src: str, dst: str, lo: str) -> None:
+    _libreoffice_convert(src, "pdf", dst, lo)
+
+
+def _docx_to_pdf_reportlab(src: str, dst: str) -> None:
+    """reportlab 纯 Python 渲染 docx -> pdf（无需 LibreOffice）。
 
     保留段落、标题层级与表格；图片不保留，复杂排版（如分栏、文本框）
     会简化为线性排版。中文依赖系统中文字体（自动探测）。
@@ -105,6 +233,76 @@ def docx_to_pdf(src: str, dst: str) -> None:
         topMargin=20 * mm, bottomMargin=20 * mm,
     )
     pdf.build(flow)
+
+
+def docx_to_pdf(src: str, dst: str) -> None:
+    """docx -> pdf：优先 LibreOffice 保排版，无 LibreOffice 时回退纯 Python。"""
+    lo = find_libreoffice()
+    if lo:
+        _docx_to_pdf_libreoffice(src, dst, lo)
+    else:
+        _docx_to_pdf_reportlab(src, dst)
+
+
+# ------------------------- .doc 读写 (经 LibreOffice) -------------------------
+def _doc_to_temp_docx(src: str) -> str:
+    """用 LibreOffice 把 .doc 转成临时 .docx，返回路径（调用方负责删除）。"""
+    lo = _get_lo()
+    if not lo:
+        raise RuntimeError(
+            "未找到 LibreOffice，无法转换 .doc 文件。\n"
+            "本发行版已内置便携 LibreOffice；请确认 libreoffice/ 文件夹与 exe 同级，"
+            "或在 https://www.libreoffice.org/ 安装后重试。"
+        )
+    tmp = tempfile.mkdtemp(prefix="docconv_")
+    cmd = [lo, "--headless", "--convert-to", "docx", "--outdir", tmp, str(src)]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return str(Path(tmp) / (Path(src).stem + ".docx"))
+
+
+def doc_to_docx(src: str, dst: str) -> None:
+    _libreoffice_convert(src, "docx", dst)
+
+
+def doc_to_pdf(src: str, dst: str) -> None:
+    _libreoffice_convert(src, "pdf", dst)
+
+
+def docx_to_doc(src: str, dst: str) -> None:
+    _libreoffice_convert(src, "doc", dst)
+
+
+def doc_to_text(src: str, dst: str) -> None:
+    d = _doc_to_temp_docx(src)
+    try:
+        docx_to_text(d, dst)
+    finally:
+        try:
+            Path(d).unlink()
+        except OSError:
+            pass
+
+
+def doc_to_markdown(src: str, dst: str) -> None:
+    d = _doc_to_temp_docx(src)
+    try:
+        docx_to_markdown(d, dst)
+    finally:
+        try:
+            Path(d).unlink()
+        except OSError:
+            pass
+
+
+def doc_to_html(src: str, dst: str) -> None:
+    d = _doc_to_temp_docx(src)
+    try:
+        docx_to_html(d, dst)
+    finally:
+        try:
+            Path(d).unlink()
+        except OSError:
+            pass
 
 
 # ------------------------- pdf -> docx -------------------------
@@ -382,6 +580,13 @@ def docx_to_html(src: str, dst: str) -> None:
 
 # ------------------------- 路由 -------------------------
 _ROUTES = {
+    # doc (老版 Word，经 LibreOffice；发行包内置便携版)
+    ("doc", "docx"): doc_to_docx,
+    ("doc", "pdf"): doc_to_pdf,
+    ("doc", "txt"): doc_to_text,
+    ("doc", "md"): doc_to_markdown,
+    ("doc", "html"): doc_to_html,
+    ("docx", "doc"): docx_to_doc,
     # 原有
     ("docx", "pdf"): docx_to_pdf,
     ("pdf", "docx"): pdf_to_docx,

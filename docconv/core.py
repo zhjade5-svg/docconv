@@ -236,8 +236,8 @@ def _docx_to_pdf_reportlab(src: str, dst: str) -> None:
 
 
 def docx_to_pdf(src: str, dst: str) -> None:
-    """docx -> pdf：优先 LibreOffice 保排版，无 LibreOffice 时回退纯 Python。"""
-    lo = find_libreoffice()
+    """docx -> pdf：优先 LibreOffice 保排版，无 LibreOffice 时尝试自动下载，仍失败则回退纯 Python。"""
+    lo = _get_lo()
     if lo:
         _docx_to_pdf_libreoffice(src, dst, lo)
     else:

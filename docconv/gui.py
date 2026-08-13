@@ -26,7 +26,7 @@ except Exception:  # 缺 tkinterdnd2 时降级为普通 Tk，仅失去拖拽
     TkinterDnD = None
     DND_FILES = None
 
-from .core import convert, SUPPORTED
+from .core import convert, SUPPORTED, set_lo_progress_callback
 
 FORMATS = sorted(SUPPORTED)
 
@@ -90,12 +90,19 @@ class App:
         self.log = Text(root, height=8, state="disabled", bg="#f5f5f5")
         self.log.pack(fill="x", padx=12, pady=6)
 
+        # LibreOffice 自动下载 / 解压进度回调（线程安全更新日志）
+        set_lo_progress_callback(self._lo_log)
+
     # ---------- 日志 ----------
     def log_msg(self, msg):
         self.log.config(state="normal")
         self.log.insert(END, msg + "\n")
         self.log.see(END)
         self.log.config(state="disabled")
+
+    def _lo_log(self, stage, percent):
+        text = f"⏳ {stage}" + (f" {percent:.0f}%" if percent is not None else "")
+        self.root.after(0, lambda: self.log_msg(text))
 
     # ---------- 文件管理 ----------
     def _parse_drop(self, data):

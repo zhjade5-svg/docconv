@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docconv"
-version = "0.4.0"
+version = "0.4.1"
 description = "轻量文档格式转换工具：doc / docx / pdf / txt / md / csv / xlsx / html 互转（含图形界面，发行版内置便携 LibreOffice）"
 readme = "README.md"
 requires-python = ">=3.8"

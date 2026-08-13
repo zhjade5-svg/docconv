@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docconv"
-version = "0.3.0"
-description = "轻量文档格式转换工具：docx / pdf / txt / md / csv / xlsx / html 互转（含图形界面，纯 Python 无需 LibreOffice）"
+version = "0.4.0"
+description = "轻量文档格式转换工具：doc / docx / pdf / txt / md / csv / xlsx / html 互转（含图形界面，发行版内置便携 LibreOffice）"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [{ name = "Jade", email = "zhjade5@gmail.com" }]
-keywords = ["docx", "pdf", "convert", "document", "word", "markdown", "xlsx", "csv", "html"]
+keywords = ["doc", "docx", "pdf", "convert", "document", "word", "markdown", "xlsx", "csv", "html", "libreoffice"]
 dependencies = [
     "pdfplumber>=3.0",
     "python-docx>=1.1",
